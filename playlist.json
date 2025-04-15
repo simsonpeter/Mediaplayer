@@ -1,0 +1,18 @@
+{
+  "tracks": [
+    {
+      "id": 1,
+      "title": "Sunset Dreams",
+      "artist": "Chill Wave",
+      "audioUrl": "https://example.com/audio/sunset.mp3",
+      "coverUrl": "https://example.com/covers/sunset.jpg"
+    },
+    {
+      "id": 2,
+      "title": "Urban Nights",
+      "artist": "City Vibes",
+      "audioUrl": "https://example.com/audio/urban.mp3",
+      "coverUrl": "https://example.com/covers/urban.jpg"
+    }
+  ]
+}
