@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NJC Audio Player</title>
+    <title>Material Audio Player</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         :root {
@@ -19,7 +19,7 @@
             --elevation-2: 0 3px 1px -2px rgba(0,0,0,0.2), 0 2px 2px 0 rgba(0,0,0,0.14), 0 1px 5px 0 rgba(0,0,0,0.12);
         }
 
-        /* Dark theme variables - fixed contrast */
+        /* Dark theme variables */
         .dark-theme {
             --surface: #121212;
             --background: #000000;
@@ -68,12 +68,25 @@
             text-align: center;
         }
 
-        .theme-toggle {
+        .title-bar-button {
             background: none;
             border: none;
             color: var(--on-primary);
             cursor: pointer;
-            margin-left: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+
+        .title-bar-button:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .title-bar-button:active {
+            background-color: rgba(255, 255, 255, 0.2);
         }
         
         .player-container {
@@ -413,8 +426,11 @@
 </head>
 <body>
     <div class="title-bar">
+        <button class="title-bar-button" id="browser-btn">
+            <span class="material-icons">folder_open</span>
+        </button>
         <div class="title">Material Audio Player</div>
-        <button class="theme-toggle" id="themeToggle">
+        <button class="title-bar-button" id="themeToggle">
             <span class="material-icons">brightness_4</span>
         </button>
     </div>
@@ -470,8 +486,8 @@
         </div>
     </div>
     
-    <div class="fab" id="playlist-btn">
-        <span class="material-icons">queue_music</span>
+    <div class="fab" id="download-btn">
+        <span class="material-icons">download</span>
     </div>
     
     <!-- Playlist Modal -->
@@ -482,6 +498,23 @@
                 <button class="close-modal" id="close-modal">&times;</button>
             </div>
             <div id="playlist-container"></div>
+        </div>
+    </div>
+    
+    <!-- Download Modal -->
+    <div class="modal" id="download-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Download for Offline</h3>
+                <button class="close-modal" id="close-download-modal">&times;</button>
+            </div>
+            <div id="download-options">
+                <p>Select tracks to download for offline playback:</p>
+                <div id="download-list"></div>
+                <button class="mdc-icon-button mdc-icon-button--primary" id="start-download" style="margin-top: 20px;">
+                    <span class="material-icons">cloud_download</span> Download Selected
+                </button>
+            </div>
         </div>
     </div>
     
@@ -507,12 +540,17 @@
         const trackArtist = document.getElementById('track-artist');
         const coverArt = document.getElementById('cover-art');
         const playerContainer = document.querySelector('.player-container');
-        const playlistBtn = document.getElementById('playlist-btn');
+        const browserBtn = document.getElementById('browser-btn');
         const playlistModal = document.getElementById('playlist-modal');
         const closeModalBtn = document.getElementById('close-modal');
         const playlistContainer = document.getElementById('playlist-container');
         const themeToggle = document.getElementById('themeToggle');
         const themeIcon = themeToggle.querySelector('.material-icons');
+        const downloadBtn = document.getElementById('download-btn');
+        const downloadModal = document.getElementById('download-modal');
+        const closeDownloadModal = document.getElementById('close-download-modal');
+        const downloadList = document.getElementById('download-list');
+        const startDownloadBtn = document.getElementById('start-download');
         
         // Player state
         let currentTrack = JSON.parse(localStorage.getItem('currentTrack')) || null;
@@ -522,9 +560,45 @@
         let previousVolume = 0.7;
         let playlist = [];
         let isDarkTheme = localStorage.getItem('darkTheme') === 'true';
+        let downloadedTracks = JSON.parse(localStorage.getItem('downloadedTracks')) || {};
+
+        // Initialize IndexedDB for offline storage
+        let db;
+        const DB_NAME = 'AudioPlayerDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'tracks';
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                
+                request.onerror = (event) => {
+                    console.error('Database error:', event.target.error);
+                    reject('Database error');
+                };
+                
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    resolve(db);
+                };
+                
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                    }
+                };
+            });
+        }
         
         // Initialize player
         async function initPlayer() {
+            // Initialize database
+            await initDB();
+            
+            // Load downloaded tracks from localStorage
+            checkDownloadedTracks();
+            
             // Set initial theme
             updateTheme();
             
@@ -541,9 +615,12 @@
             volumeSlider.addEventListener('input', setVolume);
             muteBtn.addEventListener('click', toggleMute);
             maxVolumeBtn.addEventListener('click', setMaxVolume);
-            playlistBtn.addEventListener('click', showPlaylistModal);
+            browserBtn.addEventListener('click', showPlaylistModal);
             closeModalBtn.addEventListener('click', hidePlaylistModal);
             themeToggle.addEventListener('click', toggleTheme);
+            downloadBtn.addEventListener('click', showDownloadModal);
+            closeDownloadModal.addEventListener('click', hideDownloadModal);
+            startDownloadBtn.addEventListener('click', downloadSelectedTracks);
             
             // Audio player events
             audioPlayer.addEventListener('timeupdate', updateProgress);
@@ -573,6 +650,159 @@
             }
         }
         
+        // Check which tracks are already downloaded
+        function checkDownloadedTracks() {
+            playlist.forEach(track => {
+                if (downloadedTracks[track.id]) {
+                    track.downloaded = true;
+                }
+            });
+        }
+        
+        // Show download modal
+        function showDownloadModal() {
+            downloadList.innerHTML = '';
+            
+            playlist.forEach(track => {
+                const item = document.createElement('div');
+                item.className = 'playlist-item';
+                item.innerHTML = `
+                    <div class="playlist-item-cover" style="background-image: url(${track.coverUrl})"></div>
+                    <div class="playlist-item-info">
+                        <div class="playlist-item-title">${track.title}</div>
+                        <div class="playlist-item-artist">${track.artist}</div>
+                    </div>
+                    <div style="margin-left: auto;">
+                        <input type="checkbox" id="download-${track.id}" ${track.downloaded ? 'disabled' : ''}>
+                        ${track.downloaded ? '<span class="material-icons" style="color: var(--primary);">check_circle</span>' : ''}
+                    </div>
+                `;
+                downloadList.appendChild(item);
+            });
+            
+            downloadModal.style.display = 'flex';
+        }
+        
+        // Hide download modal
+        function hideDownloadModal() {
+            downloadModal.style.display = 'none';
+        }
+        
+        // Download selected tracks
+        async function downloadSelectedTracks() {
+            const checkboxes = downloadList.querySelectorAll('input[type="checkbox"]:not(:disabled)');
+            const selectedTracks = [];
+            
+            checkboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    const trackId = checkbox.id.replace('download-', '');
+                    const track = playlist.find(t => t.id == trackId);
+                    if (track) selectedTracks.push(track);
+                }
+            });
+            
+            if (selectedTracks.length === 0) {
+                alert('Please select at least one track to download');
+                return;
+            }
+            
+            startDownloadBtn.disabled = true;
+            startDownloadBtn.innerHTML = '<span class="material-icons">hourglass_empty</span> Downloading...';
+            
+            try {
+                for (const track of selectedTracks) {
+                    await downloadTrack(track);
+                }
+                alert('Download completed! These tracks are now available offline.');
+                hideDownloadModal();
+            } catch (error) {
+                console.error('Download error:', error);
+                alert('Some downloads failed. Please check your connection and try again.');
+            } finally {
+                startDownloadBtn.disabled = false;
+                startDownloadBtn.innerHTML = '<span class="material-icons">cloud_download</span> Download Selected';
+            }
+        }
+        
+        // Download individual track
+        async function downloadTrack(track) {
+            return new Promise((resolve, reject) => {
+                // First try to fetch the audio file
+                fetch(track.audioUrl)
+                    .then(response => {
+                        if (!response.ok) throw new Error('Network response was not ok');
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        // Store in IndexedDB
+                        const transaction = db.transaction([STORE_NAME], 'readwrite');
+                        const store = transaction.objectStore(STORE_NAME);
+                        
+                        const trackData = {
+                            id: track.id,
+                            title: track.title,
+                            artist: track.artist,
+                            coverUrl: track.coverUrl,
+                            audioBlob: blob,
+                            lastUpdated: new Date().toISOString()
+                        };
+                        
+                        const request = store.put(trackData);
+                        
+                        request.onsuccess = () => {
+                            // Mark as downloaded in our local state
+                            track.downloaded = true;
+                            downloadedTracks[track.id] = true;
+                            localStorage.setItem('downloadedTracks', JSON.stringify(downloadedTracks));
+                            resolve();
+                        };
+                        
+                        request.onerror = (event) => {
+                            console.error('Error saving to IndexedDB:', event.target.error);
+                            reject('Database error');
+                        };
+                    })
+                    .catch(error => {
+                        console.error('Download failed:', error);
+                        reject('Download failed');
+                    });
+            });
+        }
+        
+        // Play a track (checks for offline version first)
+        function playTrack(track) {
+            if (track.downloaded) {
+                // Try to play from IndexedDB
+                const transaction = db.transaction([STORE_NAME], 'readonly');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.get(track.id);
+                
+                request.onsuccess = (event) => {
+                    const trackData = event.target.result;
+                    if (trackData && trackData.audioBlob) {
+                        const audioUrl = URL.createObjectURL(trackData.audioBlob);
+                        audioPlayer.src = audioUrl;
+                        audioPlayer.play().catch(e => console.error('Playback failed:', e));
+                    } else {
+                        // Fallback to online version
+                        audioPlayer.src = track.audioUrl;
+                        audioPlayer.play().catch(e => console.error('Playback failed:', e));
+                    }
+                };
+                
+                request.onerror = (event) => {
+                    console.error('Error reading from IndexedDB:', event.target.error);
+                    // Fallback to online version
+                    audioPlayer.src = track.audioUrl;
+                    audioPlayer.play().catch(e => console.error('Playback failed:', e));
+                };
+            } else {
+                // Play online version
+                audioPlayer.src = track.audioUrl;
+                audioPlayer.play().catch(e => console.error('Playback failed:', e));
+            }
+        }
+        
         // Theme functions
         function updateTheme() {
             if (isDarkTheme) {
@@ -598,6 +828,9 @@
                 const data = await response.json();
                 playlist = data.tracks;
                 localStorage.setItem('playlist', JSON.stringify(playlist));
+                
+                // Check which tracks are downloaded
+                checkDownloadedTracks();
                 
                 // If no current track, set first track
                 if (!currentTrack && playlist.length > 0) {
@@ -637,6 +870,7 @@
                         <div class="playlist-item-title">${track.title}</div>
                         <div class="playlist-item-artist">${track.artist}</div>
                     </div>
+                    ${track.downloaded ? '<span class="material-icons" style="color: var(--primary); margin-left: auto;">check_circle</span>' : ''}
                 `;
                 
                 item.addEventListener('click', () => {
@@ -646,7 +880,7 @@
                     localStorage.setItem('currentTrackIndex', currentTrackIndex);
                     loadTrack(currentTrack);
                     if (isPlaying) {
-                        audioPlayer.play();
+                        playTrack(currentTrack);
                     }
                     hidePlaylistModal();
                 });
@@ -658,7 +892,6 @@
         // Load a track
         function loadTrack(track) {
             currentTrack = track;
-            audioPlayer.src = track.audioUrl;
             
             // Update UI
             trackTitle.textContent = track.title;
@@ -669,6 +902,11 @@
             [playPauseBtn, prevBtn, nextBtn, rewindBtn, forwardBtn].forEach(btn => {
                 btn.disabled = false;
             });
+            
+            // If already playing, continue playback with the new track
+            if (isPlaying) {
+                playTrack(track);
+            }
         }
         
         // Play/Pause toggle
@@ -678,7 +916,7 @@
             if (isPlaying) {
                 audioPlayer.pause();
             } else {
-                audioPlayer.play();
+                playTrack(currentTrack);
             }
         }
         
@@ -691,7 +929,7 @@
             localStorage.setItem('currentTrack', JSON.stringify(currentTrack));
             localStorage.setItem('currentTrackIndex', currentTrackIndex);
             loadTrack(currentTrack);
-            audioPlayer.play();
+            playTrack(currentTrack);
         }
         
         // Play next track
@@ -703,7 +941,7 @@
             localStorage.setItem('currentTrack', JSON.stringify(currentTrack));
             localStorage.setItem('currentTrackIndex', currentTrackIndex);
             loadTrack(currentTrack);
-            audioPlayer.play();
+            playTrack(currentTrack);
         }
         
         // Rewind 10 seconds
