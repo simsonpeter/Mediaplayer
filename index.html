@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Material Audio Player</title>
+    <title>TC Media</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         :root {
@@ -68,25 +68,12 @@
             text-align: center;
         }
 
-        .title-bar-button {
+        .theme-toggle {
             background: none;
             border: none;
             color: var(--on-primary);
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 8px;
-            border-radius: 50%;
-            transition: background-color 0.2s;
-        }
-
-        .title-bar-button:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-
-        .title-bar-button:active {
-            background-color: rgba(255, 255, 255, 0.2);
+            margin-left: 10px;
         }
         
         .player-container {
@@ -422,15 +409,75 @@
             font-size: 0.875rem;
             color: var(--artist-color, rgba(0,0,0,0.6));
         }
+
+        /* Media Notification Styles */
+        .media-notification {
+            position: fixed;
+            bottom: 100px;
+            right: 24px;
+            background-color: var(--surface);
+            color: var(--on-surface);
+            border-radius: 28px;
+            padding: 12px 20px;
+            box-shadow: var(--elevation-2);
+            display: flex;
+            align-items: center;
+            z-index: 1000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 300px;
+        }
+
+        .media-notification.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .media-notification-cover {
+            width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            background-size: cover;
+            background-position: center;
+            margin-right: 12px;
+        }
+
+        .media-notification-content {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .media-notification-title {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 2px;
+        }
+
+        .media-notification-artist {
+            font-size: 0.75rem;
+            color: var(--artist-color, rgba(0,0,0,0.6));
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .media-notification-close {
+            margin-left: 12px;
+            color: var(--artist-color, rgba(0,0,0,0.6));
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     <div class="title-bar">
-        <button class="title-bar-button" id="browser-btn">
+        <button class="theme-toggle" id="browser-btn">
             <span class="material-icons">folder_open</span>
         </button>
-        <div class="title">TC Audio Player</div>
-        <button class="title-bar-button" id="themeToggle">
+        <div class="title">TC Media</div>
+        <button class="theme-toggle" id="themeToggle">
             <span class="material-icons">brightness_4</span>
         </button>
     </div>
@@ -488,6 +535,16 @@
     
     <div class="fab" id="download-btn">
         <span class="material-icons">download</span>
+    </div>
+    
+    <!-- Media Notification -->
+    <div class="media-notification" id="media-notification">
+        <div class="media-notification-cover" id="notification-cover"></div>
+        <div class="media-notification-content">
+            <div class="media-notification-title" id="notification-title">Now Playing</div>
+            <div class="media-notification-artist" id="notification-artist">Track Artist</div>
+        </div>
+        <span class="material-icons media-notification-close" id="notification-close">close</span>
     </div>
     
     <!-- Playlist Modal -->
@@ -551,6 +608,11 @@
         const closeDownloadModal = document.getElementById('close-download-modal');
         const downloadList = document.getElementById('download-list');
         const startDownloadBtn = document.getElementById('start-download');
+        const mediaNotification = document.getElementById('media-notification');
+        const notificationCover = document.getElementById('notification-cover');
+        const notificationTitle = document.getElementById('notification-title');
+        const notificationArtist = document.getElementById('notification-artist');
+        const notificationClose = document.getElementById('notification-close');
         
         // Player state
         let currentTrack = JSON.parse(localStorage.getItem('currentTrack')) || null;
@@ -561,6 +623,7 @@
         let playlist = [];
         let isDarkTheme = localStorage.getItem('darkTheme') === 'true';
         let downloadedTracks = JSON.parse(localStorage.getItem('downloadedTracks')) || {};
+        let notificationTimeout;
 
         // Initialize IndexedDB for offline storage
         let db;
@@ -589,6 +652,21 @@
                     }
                 };
             });
+        }
+        
+        // Show media notification
+        function showMediaNotification(track) {
+            notificationCover.style.backgroundImage = `url(${track.coverUrl})`;
+            notificationTitle.textContent = track.title;
+            notificationArtist.textContent = track.artist;
+            
+            mediaNotification.classList.add('show');
+            
+            // Auto-hide after 5 seconds
+            clearTimeout(notificationTimeout);
+            notificationTimeout = setTimeout(() => {
+                mediaNotification.classList.remove('show');
+            }, 5000);
         }
         
         // Initialize player
@@ -621,6 +699,9 @@
             downloadBtn.addEventListener('click', showDownloadModal);
             closeDownloadModal.addEventListener('click', hideDownloadModal);
             startDownloadBtn.addEventListener('click', downloadSelectedTracks);
+            notificationClose.addEventListener('click', () => {
+                mediaNotification.classList.remove('show');
+            });
             
             // Audio player events
             audioPlayer.addEventListener('timeupdate', updateProgress);
@@ -630,6 +711,9 @@
                 isPlaying = true;
                 playPauseIcon.textContent = 'pause';
                 playerContainer.classList.add('playing');
+                if (currentTrack) {
+                    showMediaNotification(currentTrack);
+                }
             });
             audioPlayer.addEventListener('pause', () => {
                 isPlaying = false;
